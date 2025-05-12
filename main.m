@@ -39,6 +39,7 @@ for i = 1:size(target_params, 1)
         * exp(-(f - target_params(i, 1)).^2 / (2 * target_params(i, 3).^2));
 end
 Hf = Hf / max(Hf);                 % 归一化
+H2 = abs(Hf).^2;
 
 % Clutter PSD
 Pc = zeros(1, Nf);
@@ -91,18 +92,15 @@ X_spectrum_WF = sqrt(X_ESD_WF) .* exp(1i * angle(Hf)); % 保持相位信息
 
 % ------------------------------------------------------------------------% 
 % corrected SINR (max eqution 2)
-% bang-bang 控制算法
-objective = Pc - abs(Hf).^2;    % 计算 Pc(f) - |H(f)|^2
-
-% 找到频带 W 内使 Pc(f) - |H(f)|^2 最小的频点
-[~, idx] = min(objective);
-f_star = f(idx);
-
-% 构造最优功率谱 |X(f)|^2 (bang-bang 控制)
-X_ESD_bangbang = zeros(1, Nf);
-X_ESD_bangbang(idx) = Ex / df;                  % 能量集中在 f_star (近似狄拉克 delta)
+cvx_clear
+cvx_begin
+    variable X_ESD_bangbang(1,Nf) nonnegative;    % 功率谱密度 |X(f)|^2
+    minimize(sum((Pc - H2) .* X_ESD_bangbang)); % 目标函数
+    subject to
+        sum(X_ESD_bangbang) * df <= Ex;         % 能量约束
+        % sum(X_ESD_bangbang.^2) * df <= (Ex^2 / Be); % 等效带宽约束 (Aτ ≤ 1/Be)
+cvx_end
 X_ESD_bangbang = X_ESD_bangbang / max(X_ESD_bangbang);
-
 
 % ------------------------------------------------------------------------% 
 % corrected SINR (max eqution 2, Joint Constraints Waveform Spectrum Design)
