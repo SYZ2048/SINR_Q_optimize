@@ -6,12 +6,12 @@
 % [J]. Remote Sensing, 2023, 15(21): 5187.
 % ------------------------------------------------------------------------%
 clc;clear;
-% close all;
+close all;
 rng default
 
 bandwidth = 50e6; % 50 MHz
 pulse_width = 2.5e-6; % 2.5 µs
-Be = 0.25;
+Be = 0.1;
 Nf = 1024;                          % 频点数
 f = linspace(-0.5, 0.5, Nf);        % 归一化频率范围 [-0.5, 0.5]
 df = f(2) - f(1);                  % 频率分辨率
@@ -38,8 +38,9 @@ for i = 1:size(target_params, 1)
     Hf = Hf + target_params(i, 2) / (sqrt(2*pi)*target_params(i, 3)) ...
         * exp(-(f - target_params(i, 1)).^2 / (2 * target_params(i, 3).^2));
 end
-Hf = Hf / max(Hf);                 % 归一化
+Hf_norm = Hf / max(Hf);                 % 归一化
 H2 = abs(Hf).^2;
+H2_norm = abs(Hf_norm).^2;
 
 % Clutter PSD
 Pc = zeros(1, Nf);
@@ -55,7 +56,7 @@ end
 %%%% not sure!!!!!!!!!!
 Pc = abs(Pc).^2;
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-Pc = Pc / max(Pc);                 % 归一化
+Pc_norm = Pc / max(Pc);                 % 归一化
 
 % 噪声PSD
 Pn = ones(1, Nf);                   % 白噪声（单位功率）
@@ -87,7 +88,7 @@ for iter = 1:max_iter
     end
 end
 
-X_ESD_WF = X_ESD_WF / max(X_ESD_WF);
+X_ESD_WF_norm = X_ESD_WF / max(X_ESD_WF);
 X_spectrum_WF = sqrt(X_ESD_WF) .* exp(1i * angle(Hf)); % 保持相位信息
 
 % ------------------------------------------------------------------------% 
@@ -100,10 +101,21 @@ cvx_begin
         sum(X_ESD_bangbang) * df <= Ex;         % 能量约束
         % sum(X_ESD_bangbang.^2) * df <= (Ex^2 / Be); % 等效带宽约束 (Aτ ≤ 1/Be)
 cvx_end
-X_ESD_bangbang = X_ESD_bangbang / max(X_ESD_bangbang);
+X_ESD_bangbang_norm = X_ESD_bangbang / max(X_ESD_bangbang);
 
 % ------------------------------------------------------------------------% 
 % corrected SINR (max eqution 2, Joint Constraints Waveform Spectrum Design)
+cvx_clear
+cvx_begin
+    variable X_ESD_joint(1,Nf) nonnegative;    % 功率谱密度 |X(f)|^2
+    minimize(sum((Pc - H2) .* X_ESD_joint)); % 目标函数
+    subject to
+        sum(X_ESD_joint) * df <= Ex;         % 能量约束
+        sum(X_ESD_joint.^2) * df <= (Ex^2 / Be); % 等效带宽约束 (Aτ ≤ 1/Be)
+cvx_end
+X_ESD_joint_norm = X_ESD_joint / max(X_ESD_joint);
+
+% According to Algorithm 1, NOT FINISHED!!!!
 % X_ESD_Joint = ones(1, Nf) * Ex / (Nf * df); % 初始均匀分布
 % v = 0;                            % Lagrange乘数初始化
 % lambda = 0;                       % Lagrange乘数初始化
@@ -130,19 +142,49 @@ X_ESD_bangbang = X_ESD_bangbang / max(X_ESD_bangbang);
 %     end
 % end
 % X_ESD_Joint = X_ESD_Joint / sum(X_ESD_Joint) * (Ex / df);
+% ------------------------------------------------------------------------% 
+% corrected SINR (max eqution 2, Q function constrain)
+% cvx_clear
+% cvx_begin
+%     variable X_ESD_joint(1,Nf) nonnegative;    % 功率谱密度 |X(f)|^2
+%     minimize(sum((Pc - H2) .* X_ESD_joint)); % 目标函数
+%     subject to
+%         sum(X_ESD_joint) * df <= Ex;         % 能量约束
+%         sum(X_ESD_joint.^2) * df <= (Ex^2 / Be); % Q function constrain
+% cvx_end
+% X_ESD_joint_norm = X_ESD_joint / max(X_ESD_joint);
+
+
+
 
 %% 绘制结果
 figure;
-plot(f, abs(Hf).^2, 'k--', 'LineWidth', 1.5); hold on;
-plot(f, Pc, 'g--', 'LineWidth', 1.5);
+plot(f, H2_norm, 'k--', 'LineWidth', 1.5); hold on;
+plot(f, Pc_norm, 'g--', 'LineWidth', 1.5);
 plot(f, Pn, 'k--', 'LineWidth', 1);
-plot(f, X_ESD_WF, 'b-', 'LineWidth', 1);
-plot(f, X_ESD_bangbang, 'r-', 'LineWidth', 1);
-legend('Target ESD |H(f)|^2', 'Clutter PSD P_c(f)', 'Noise PSD P_n(f)', 'Original WF ESD', 'bangbang ESD', 'Location', 'bestoutside');
+plot(f, X_ESD_WF_norm, 'b-', 'LineWidth', 1);
+plot(f, X_ESD_bangbang_norm, 'r-', 'LineWidth', 1.5);
+plot(f, X_ESD_joint_norm, 'y-', 'LineWidth', 1);
+legend('Target ESD |H(f)|^2', 'Clutter PSD P_c(f)', 'Noise PSD P_n(f)', 'Original WF ESD', 'bangbang ESD', 'joint ESD', 'Location', 'bestoutside');
 title('Target and Interference Spectrum');
 xlabel('Normalized Frequency');
-ylabel('Power');
+ylabel('Nomalized ESD and PSD');
 grid on;
+
+% 不归一化啥也看不见了……
+% figure;
+% plot(f, H2, 'k--', 'LineWidth', 1.5); hold on;
+% plot(f, Pc, 'g--', 'LineWidth', 1.5);
+% plot(f, Pn, 'k--', 'LineWidth', 1);
+% plot(f, X_ESD_WF, 'b-', 'LineWidth', 1);
+% plot(f, X_ESD_bangbang, 'r-', 'LineWidth', 1.5);
+% plot(f, X_ESD_joint, 'y-', 'LineWidth', 1);
+% legend('Target ESD |H(f)|^2', 'Clutter PSD P_c(f)', 'Noise PSD P_n(f)', 'Original WF ESD', 'bangbang ESD', 'joint ESD', 'Location', 'bestoutside');
+% title('Target and Interference Spectrum');
+% xlabel('Normalized Frequency');
+% ylabel('ESD and PSD');
+% grid on;
+
 
 % figure;
 % plot(f, X_wf, 'g', 'LineWidth', 1.5); hold on;
@@ -154,10 +196,14 @@ grid on;
 
 
 %% 计算SINR
-SINR = sum(abs(Hf).^2 .* X_wf) / sum(X_wf .* Pc + Pn);
-SINR_corrected = sum(abs(Hf).^2 .* X_corrected) / sum(X_corrected .* Pc + Pn);
-fprintf('Original WF SINR: %.4f\n', SINR_wf);
-fprintf('Corrected Metric SINR: %.4f\n', SINR_corrected);
+SINR_WF = sum(abs(Hf).^2 .* X_ESD_WF) / sum(X_ESD_WF .* Pc + Pn);
+SINR_bangbang = sum(abs(Hf).^2 .* X_ESD_bangbang) / sum(X_ESD_bangbang .* Pc + Pn);
+X_ESD_joint = sum(abs(Hf).^2 .* X_ESD_joint) / sum(X_ESD_joint .* Pc + Pn);
+
+% SINR_corrected = sum(abs(Hf).^2 .* X_corrected) / sum(X_corrected .* Pc + Pn);
+fprintf('Original WF SINR: %.4f\n', SINR_WF);
+fprintf('Corrected Metric SINR: %.4f\n', SINR_bangbang);
+fprintf('Corrected Metric SINR: %.4f\n', X_ESD_joint);
 
 %% 时域恒模序列合成（Algorithm 2）
 % X_spectrum = sqrt(x) .* exp(1i * 2*pi*rand(1,Nf)); % 随机相位
