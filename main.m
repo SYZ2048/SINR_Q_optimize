@@ -1,7 +1,7 @@
 %
 % ------------------------------------------------------------------------%
-% Refer to: 
-% Yang C, Yang W, Qiu X, et al. Cognitive Radar Waveform Design Method 
+% Refer to:
+% Yang C, Yang W, Qiu X, et al. Cognitive Radar Waveform Design Method
 % under the Joint Constraints of Transmit Energy and Spectrum Bandwidth
 % [J]. Remote Sensing, 2023, 15(21): 5187.
 % ------------------------------------------------------------------------%
@@ -9,7 +9,7 @@ clc;clear;
 close all;
 rng default
 
-bandwidth = 10e3; % 10k 
+bandwidth = 10e3; % 10k
 pulse_width = 1e-3; % 1 ms
 Be = 0.25;      % equivalent bandwidth
 Nf = 1024;                          % 频点数
@@ -17,26 +17,148 @@ f = linspace(-0.5, 0.5, Nf);        % 归一化频率范围 [-0.5, 0.5]
 df = f(2) - f(1);                  % 频率分辨率
 Ex = 1e1;
 Q_ub = 1;
+c = 1500;
 
-fd = 1e5 / bandwidth;
+% target info
+v_target = 3; % m/s
+eta = 1 + 2*v_target / c;
+fd = bandwidth * (eta - 1) / bandwidth;
 fd_num = round(fd / df);
 
+% CM sequence generation para
+max_iter = 5000;
+tolerance = 1e-1;
+M = 1000;  % 时域信号的点数
+
+
 % ------------------------------------------------------------------------%
+[Hf, Pc, Pn, H2] = environment_init(Nf, bandwidth, f);
+Hf_norm = Hf / max(Hf); H2_norm = abs(Hf_norm).^2;                 % 归一化
+Pc_norm = Pc / max(Pc);                 % 归一化
+Pn_norm = Pn / max(Pn);
+
+% visualize |H(f)|^2, Pc, Pn
+% figure;
+% plot(f, H2, 'k--', 'LineWidth', 1.5); hold on;
+% plot(f, Pc, 'g--', 'LineWidth', 1.5);
+% plot(f, Pn, 'k--', 'LineWidth', 1);
+% legend('Target ESD |H(f)|^2', 'Clutter PSD P_c(f)', 'Noise PSD P_n(f)', 'Location', 'bestoutside');
+% title('Target and Interference Spectrum');
+% xlabel('Normalized Frequency');
+% ylabel('ESD and PSD');
+% grid on;
+figure;
+plot(f, H2_norm, 'k--', 'LineWidth', 1.5); hold on;
+plot(f, Pc_norm, 'g--', 'LineWidth', 1.5);
+plot(f, Pn_norm, 'k--', 'LineWidth', 1);
+legend('Target ESD |H(f)|^2', 'Clutter PSD P_c(f)', 'Noise PSD P_n(f)', 'Location', 'bestoutside');
+title('Target and Interference Spectrum');
+xlabel('Frequency');
+ylabel('ESD and PSD');
+grid on;
+
+methods_to_run = {'waterfill', 'joint', 'QfuncComb'};     % waterfill, bangbang, joint, Qfunc, QfuncComb
+results = struct();
+for i = 1:length(methods_to_run)
+    method = methods_to_run{i};
+    fprintf('**** %s 算法 ****\n', method);
+
+    switch method
+        case 'waterfill'
+            X_ESD = method_waterfill(H2, Pc, Pn, f, Ex);
+        case 'bangbang'
+            X_ESD = method_bangbang(H2, Pc, f, Ex);
+        case 'joint'
+            X_ESD = method_joint(H2, Pc, f, Ex, Be);
+        case 'Qfunc'
+            X_ESD = method_Qfunc(H2, Pc, Pn, f, Ex, Be, Q_ub, fd_num);
+        case 'QfuncComb'
+            X_ESD = method_Qfunc_comb(H2, Pc, Pn, f, Ex, fd);
+        otherwise
+            warning('未知方法: %s', method);
+            continue;
+    end
+    results.(method).X_ESD = X_ESD;
+
+    results.(method).SINR = SINR_compute(X_ESD, H2, Pc, Pn);
+    fprintf('SINR(dB): %.4f\n', 10 * log10(results.(method).SINR));
+    fprintf('fd处Q函数值为： %.4f \n',  Qfunc(X_ESD, fd_num, f, Ex));
+    fprintf('注水算法等效带宽： %.4f \n', equivalent_bandwidth(X_ESD, f));
+    fprintf('能量： %.4f \n', energy(X_ESD, f))
+
+    [signal, ESD_synthesized] = synthesize_signal_from_ESD(X_ESD.', M, max_iter, tolerance);
+    results.(method).signal = signal;
+    results.(method).autocorr = xcorr(signal, 'normalized'); % 归一化自相关
+    results.(method).lags = -length(signal)+1 : length(signal)-1; % 时延序列
+    results.(method).ESD_synthesized = ESD_synthesized;
+
+end
+
+% 环境PSD+波形ESD的归一化频谱
+figure;
+plot(f, H2_norm, 'k--', 'LineWidth', 0.5); hold on;
+plot(f, Pc_norm, 'g--', 'LineWidth', 0.5);
+plot(f, Pn_norm, 'k--', 'LineWidth', 1);
+colors = {'b','r', 'm', 'c', 'g', 'y'};  % 自动配色用
+for i = 1:length(methods_to_run)
+    method = methods_to_run{i};
+    X_ESD_norm = normalize_esd(results.(method).X_ESD);
+    plot(f, X_ESD_norm, '-', 'LineWidth', 0.5, 'Color', colors{i});
+end
+legend_labels = [{'Target ESD |H(f)|^2', 'Clutter PSD P_c(f)', 'Noise PSD P_n(f)'}, ...
+                 strcat(methods_to_run, ' ESD')];
+legend(legend_labels, 'Location', 'bestoutside');
+title('Target and Interference Spectrum');
+xlabel('Normalized Frequency');
+ylabel('Normalized ESD and PSD');
+grid on;
+
+% 各自方法波形的ESD
+figure;
+for i = 1:length(methods_to_run)
+    method = methods_to_run{i};
+    plot(f, results.(method).X_ESD, 'LineWidth', 0.5, 'Color', colors{i}); hold on;
+end
+legend(methods_to_run, 'Location', 'bestoutside');
+title('Waveform Power Spectrum |X(f)|^2');
+xlabel('Normalized Frequency');
+ylabel('ESD |X(f)|^2');
+grid on;
+
+% 时域波形自相关（AF 0多普勒切面）
+figure;
+for i = 1:length(methods_to_run)
+    method = methods_to_run{i};
+    ac = results.(method).autocorr;
+    lags = results.(method).lags;
+    plot(lags, 20*log10(abs(ac)), 'LineWidth', 0.5, 'Color', colors{i}); hold on;
+end
+legend(strcat(methods_to_run, ' autocorr'), 'Location', 'bestoutside');
+xlabel('时延（采样点）');
+ylabel('归一化自相关幅值 (dB)');
+title('合成信号的自相关函数（对数刻度）');
+ylim([-60, 0]);
+grid on;
+
+
+
+%% ------------------------  封装函数    ------------------------------------%
+function [Hf, Pc, Pn, H2] = environment_init(Nf, bandwidth, f)
 % target frequency response H(f),  consist of several Gaussian spectra. ESD = abs(Hf).^2
 Hf = zeros(1, Nf);
 % Data from Table 1, | center frequency | weight | variance | of each target Gaussian spectrum
-target_params = [                   
+target_params = [
     -0.42, 0.3, 1.70;
     -0.38, 0.5, 1.70;
     -0.25, 0.8, 1.70;
     -0.20, 1.0, 8.00;
     -0.07, 1.0, 8.00;
-     0.08, 1.0, 1.70;
-     0.15, 0.2, 1.70;
-     0.28, 0.25, 1.70;
-     0.31, 0.8, 8.00;
-     0.39, 0.9, 8.00
-];
+    0.08, 1.0, 1.70;
+    0.15, 0.2, 1.70;
+    0.28, 0.25, 1.70;
+    0.31, 0.8, 8.00;
+    0.39, 0.9, 8.00
+    ];
 target_params(:, 3) = target_params(:, 3) * 1e2 / bandwidth;
 for i = 1:size(target_params, 1)
     Hf = Hf + target_params(i, 2) / (sqrt(2*pi)*target_params(i, 3)) ...
@@ -44,21 +166,17 @@ for i = 1:size(target_params, 1)
 end
 H2 = abs(Hf).^2;
 
-
 % Clutter PSD
 Pc = zeros(1, Nf);
 clutter_params = [                 % 杂波参数（频点、权重、方差）
-    -0.25, 1.0, 8.3;
-     0.20, 1.0, 8.3
-];
-clutter_params(:, 3) = clutter_params(:, 3) * 1e2 / bandwidth;
+    -0.25, 1.0, 1.3;
+    0.20, 1.0, 1.3
+    ];
+clutter_params(:, 3) = clutter_params(:, 3) * 1e3 / bandwidth;
 for i = 1:size(clutter_params, 1)
     Pc = Pc + clutter_params(i, 2) / (sqrt(2*pi)*clutter_params(i, 3)) ...
         * exp(-(f - clutter_params(i, 1)).^2 / (2 * clutter_params(i, 3).^2));
 end
-
-% Pc = abs(Pc).^2;      %%%% not sure!!!!!!!!!!
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 % 噪声PSD
 Pn = ones(1, Nf);                   % 白噪声（单位功率）
@@ -70,287 +188,150 @@ energy_noise = trapz(f, Pn);             % 噪声的能量
 scale_target = 1 / energy_target;   % 目标的缩放因子
 scale_clutter = 1 / energy_clutter; % 杂波的缩放因子
 scale_noise = 1 / energy_noise;     % 噪声的缩放因子
-
-% 对目标、杂波和噪声进行缩放，使它们的能量相等
 Hf = Hf * sqrt(scale_target);
 Pc = Pc * scale_clutter;
 Pn = Pn * scale_noise;
 H2 = abs(Hf).^2;
+end
 
-Hf_norm = Hf / max(Hf); H2_norm = abs(Hf_norm).^2;                 % 归一化
-Pc_norm = Pc / max(Pc);                 % 归一化
-Pn_norm = Pn / max(Pn);
-
-% visualize |H(f)|^2, Pc, Pn
-figure;
-plot(f, H2, 'k--', 'LineWidth', 1.5); hold on;
-plot(f, Pc, 'g--', 'LineWidth', 1.5);
-plot(f, Pn, 'k--', 'LineWidth', 1);
-legend('Target ESD |H(f)|^2', 'Clutter PSD P_c(f)', 'Noise PSD P_n(f)', 'Location', 'bestoutside');
-title('Target and Interference Spectrum');
-xlabel('Normalized Frequency');
-ylabel('ESD and PSD');
-grid on;
-figure;
-plot(f, H2_norm, 'k--', 'LineWidth', 1.5); hold on;
-plot(f, Pc_norm, 'g--', 'LineWidth', 1.5);
-plot(f, Pn_norm, 'k--', 'LineWidth', 1);
-legend('Target ESD |H(f)|^2', 'Clutter PSD P_c(f)', 'Noise PSD P_n(f)', 'Location', 'bestoutside');
-title('Target and Interference Spectrum');
-xlabel('Normalized Frequency');
-ylabel('ESD and PSD');
-grid on;
-
-%% ------------------------------------------------------------------------% 
+function X_ESD = method_waterfill(H2, Pc, Pn, f, Ex)
 % Water filling (max eqution 1)
 % Refer to:
 % Theory and application of SNR and mutual information matched illumination waveforms
-%
-Bf = sqrt(H2 .* Pn) ./ Pc;
-Df = sqrt(Pn ./ H2);
-% 注水算法：通过二分法确定常数 A = 1 / sqrt(lambda)
-A_low = min(Df); % A 的下界
-A_high = max(Df + Ex ./ Bf); % A 的上界（估计值）
-tolerance = 1e-6; % 容差
-max_iter = 1000; % 最大迭代次数
+    df = f(2) - f(1);
+    Bf = sqrt(H2 .* Pn) ./ Pc;
+    Df = sqrt(Pn ./ H2);
+    % 注水算法：通过二分法确定常数 A = 1 / sqrt(lambda)
+    A_low = min(Df); % A 的下界
+    A_high = max(Df + Ex ./ Bf); % A 的上界（估计值）
+    tolerance = 1e-6; % 容差
+    max_iter = 1000; % 最大迭代次数
 
-for iter = 1:max_iter
-    A = (A_low + A_high) / 2;
-    X_ESD_WF = max(0, Bf .* (A - Df));
-    current_Ex = trapz(f, X_ESD_WF); % trapz：积分，计算当前能量
-
-    if abs(current_Ex - Ex) < tolerance
-        fprintf('注水算法在 %d 次迭代后收敛。\n', iter);
-        break; % 满足能量约束
-    elseif current_Ex < Ex
-        A_low = A; % 能量不足，增加 A
-    else
-        A_high = A; % 能量过多，减小 A
+    for iter = 1:max_iter
+        A = (A_low + A_high) / 2;
+        X_ESD = max(0, Bf .* (A - Df));
+        current_Ex = trapz(f, X_ESD); % trapz：积分，计算当前能量
+        if abs(current_Ex - Ex) < tolerance
+            fprintf('注水算法在 %d 次迭代后收敛。\n', iter);
+            break; % 满足能量约束
+        elseif current_Ex < Ex
+            A_low = A; % 能量不足，增加 A
+        else
+            A_high = A; % 能量过多，减小 A
+        end
     end
 end
 
-X_ESD_WF_norm = X_ESD_WF / max(X_ESD_WF);
-
-fprintf('注水算法等效带宽： %.4f \n', ((sum(X_ESD_WF) * df)^2 / (sum(X_ESD_WF.^2) * df)));
-fprintf('注水算法能量： %.4f \n', sum(X_ESD_WF) * df);
-fprintf('注水算法fd处Q函数值为： %.4f \n', sum(X_ESD_WF .* circshift(X_ESD_WF, [0, fd_num])) * df / Ex^2);
-
-% ------------------------------------------------------------------------% 
-% corrected SINR Q func + Comb waveform
-delta_f = 1.5 * fd;  
-X_ESD_comb = zeros(1, Nf);
-comb_freqs = -0.5 : delta_f : 0.5; % 梳状谱频点位置（归一化频率）
-
-for k = 1:length(comb_freqs)
-    [~, idx] = min(abs(f - comb_freqs(k))); % 找到最近的频点索引
-    X_ESD_comb(idx) = X_ESD_WF(idx);       % 赋值注水ESD的幅值
+function X_ESD = method_bangbang(H2, Pc, f, Ex)
+    df = f(2) - f(1);
+    Nf = length(f);
+    cvx_clear
+    cvx_begin quiet
+        variable X_ESD(1, Nf) nonnegative;
+        minimize(sum((Pc - H2) .* X_ESD));   % 目标函数
+        subject to
+            sum(X_ESD) * df <= Ex;           % 发射能量约束
+    cvx_end
 end
-X_ESD_comb = X_ESD_comb * (trapz(f, X_ESD_WF) / trapz(f, X_ESD_comb));   % 能量归一化
-X_ESD_comb_norm = X_ESD_comb / max(X_ESD_comb);
 
-fprintf('Q_Comb优化算法fd处Q函数值为： %.4f \n', sum(X_ESD_comb .* circshift(X_ESD_comb, [0, fd_num])) * df / Ex^2);
-
-
-%% ------------------------------------------------------------------------% 
-% corrected SINR (max eqution 2)
-cvx_clear
-cvx_begin quiet
-    variable X_ESD_bangbang(1,Nf) nonnegative;    % 功率谱密度 |X(f)|^2
-    minimize(sum((Pc - H2) .* X_ESD_bangbang)); % 目标函数
-    subject to
-        sum(X_ESD_bangbang) * df <= Ex;         % 能量约束
-        % sum(X_ESD_bangbang.^2) * df <= (Ex^2 / Be); % 等效带宽约束 (Aτ ≤ 1/Be)
-cvx_end
-X_ESD_bangbang_norm = X_ESD_bangbang / max(X_ESD_bangbang);
-
-% (sum(X_ESD_bangbang) * df)^2 / (sum(X_ESD_bangbang.^2) * df)
-% sum(X_ESD_bangbang) * df
-% fprintf('bangbang算法fd处Q函数值为： %.4f \n', sum(X_ESD_bangbang .* circshift(X_ESD_bangbang, [0, fd_num])) * df / Ex^2);
-
-% ------------------------------------------------------------------------% 
+function X_ESD = method_joint(H2, Pc, f, Ex, Be)
 % corrected SINR (max eqution 2, Joint Constraints Waveform Spectrum Design)
-cvx_clear
-cvx_begin quiet
-    variable X_ESD_joint(1,Nf) nonnegative;    % 功率谱密度 |X(f)|^2
-    minimize(sum((Pc - H2) .* X_ESD_joint)); % 目标函数
-    subject to
-        sum(X_ESD_joint) * df == Ex;         % 能量约束
-        sum(X_ESD_joint.^2) * df <= (Ex^2 / Be); % 等效带宽约束 (Aτ ≤ 1/Be)
-cvx_end
-X_ESD_joint_norm = X_ESD_joint / max(X_ESD_joint);
+    df = f(2) - f(1);
+    Nf = length(f);
+    cvx_clear
+    cvx_begin quiet
+        variable X_ESD(1, Nf) nonnegative;      % 功率谱密度 |X(f)|^2
+        minimize(sum((Pc - H2) .* X_ESD));      % 目标函数
+        subject to
+            sum(X_ESD) * df == Ex;              % 能量约束
+            sum(X_ESD.^2) * df <= Ex^2 / Be;    % 等效带宽约束 (Aτ ≤ 1/Be)
+    cvx_end
+end
 
-fprintf('联合优化算法等效带宽： %.4f \n', (sum(X_ESD_joint) * df)^2 / (sum(X_ESD_joint.^2) * df));
-fprintf('联合优化算法能量： %.4f \n', sum(X_ESD_joint) * df);
-fprintf('联合优化算法fd处Q函数值为： %.4f \n', sum(X_ESD_joint .* circshift(X_ESD_joint, [0, fd_num])) * df / Ex^2);
-
-% According to Algorithm 1, NOT FINISHED!!!!
-% X_ESD_Joint = ones(1, Nf) * Ex / (Nf * df); % 初始均匀分布
-% v = 0;                            % Lagrange乘数初始化
-% lambda = 0;                       % Lagrange乘数初始化
-% step = 0.01;
-% % 迭代求解KKT条件
-% for iter = 1:max_iter
-%     x_prev = X_ESD_Joint;
-%     for i = 1:Nf
-%         numerator = -Pc(i) + ESD(i) - v;
-%         if numerator > 0
-%             X_ESD_Joint(i) = numerator / (2 * lambda);
-%         else
-%             X_ESD_Joint(i) = 0;
-%         end
-%     end
-% 
-%     % 更新v和lambda（Algorithm 1）
-%     v = v + step; % 搜索步长
-%     lambda = (sum(X_ESD_Joint) - Ex/df) / (2 * Ex/df);
-% 
-%     % 检查收敛条件
-%     if norm(X_ESD_Joint - x_prev) < tolerance
-%         break;
-%     end
-% end
-% X_ESD_Joint = X_ESD_Joint / sum(X_ESD_Joint) * (Ex / df);
-% ------------------------------------------------------------------------% 
-% corrected SINR (max eqution 2, Q function constrain)
-% cvx_clear
-% cvx_begin
-%     variable X_ESD_joint(1,Nf) nonnegative;    % 功率谱密度 |X(f)|^2
-%     minimize(sum((Pc - H2) .* X_ESD_joint)); % 目标函数
-%     subject to
-%         sum(X_ESD_joint) * df <= Ex;         % 能量约束
-%         sum(X_ESD_joint.^2) * df <= (Ex^2 / Be); % Q function constrain
-% cvx_end
-% X_ESD_joint_norm = X_ESD_joint / max(X_ESD_joint);
-
-
-% ------------------------------------------------------------------------% 
+function X_ESD = method_Qfunc(H2, Pc, Pn, f, Ex, Be, Q_ub, fd_num)
 % corrected SINR (max eqution 2, Q function Constraints Waveform Spectrum Design)
-cvx_clear
-tic
-fun = @(x) (Pc - H2) * x;     % corrected SINR
-% fun = @(x) -sum((H2' .* x) ./ (Pc' .* x + Pn')) * df;       % SINR Upper bound
-% 能量约束 (线性等式约束)
-Aeq = ones(1, Nf); 
-beq = Ex / df;
+    df = f(2) - f(1);
+    Nf = length(f);
+    Aeq = ones(1, Nf);
+    beq = Ex / df;
+    x0 = (Ex / (Nf * df)) * ones(Nf, 1);
 
-% 非线性约束
-nonlcon = @(x) deal([
-    x' * x * df - (2* Ex^2 / Be);                          % 等效带宽约束 (x^2项)
-    x' * circshift(x, fd_num) * df - Q_ub * Ex^2        % 模糊函数约束
-    x' * circshift(x, fd_num-1) * df - Q_ub * Ex^2        % 模糊函数约束
-    % x' * circshift(x, fd_num+1) * df - Q_ub * Ex^2        % 模糊函数约束
-], []);
+    cvx_clear
+    fun = @(x) (Pc - H2) * x;     % corrected SINR
+    % fun = @(x) -sum((H2' .* x) ./ (Pc' .* x + Pn')) * df;       % SINR Upper bound
+    % 能量约束 (线性等式约束)
+    Aeq = ones(1, Nf);
+    beq = Ex / df;
+    % 非线性约束
+    nonlcon = @(x) deal([
+        x' * x * df - (2* Ex^2 / Be);                          % 等效带宽约束 (x^2项)
+        x' * circshift(x, fd_num) * df - Q_ub * Ex^2        % 模糊函数约束
+        x' * circshift(x, fd_num-1) * df - Q_ub * Ex^2        % 模糊函数约束
+        % x' * circshift(x, fd_num+1) * df - Q_ub * Ex^2        % 模糊函数约束
+        ], []);
+    % 设置 fmincon 选项
+    options = optimoptions('fmincon', ...
+        'Algorithm', 'interior-point', ...     % 'interior-point' 'sqp'
+        'Display', 'final', ...
+        'MaxIterations', 2000, ...
+        'MaxFunctionEvaluations', 1e6);
+    problem = createOptimProblem('fmincon', ...
+        'objective', fun, ...
+        'x0', x0, ...
+        'Aeq', Aeq, ...
+        'beq', beq, ...
+        'lb', zeros(Nf, 1), ...
+        'nonlcon', nonlcon, ...
+        'options', options);
+    % 设置 MultiStart 搜索器，执行多起点搜索，尝试 20 个随机初值
+    ms = MultiStart('UseParallel', false, 'Display', 'none');  % 可设置 true 并行加速
+    [x_best, fval_best, exitflag, output, manymins] = run(ms, problem, 1);
+    X_ESD = x_best';
+end
 
-% 初始点模板（扰动分布）
-x0 = (Ex / (Nf * df)) * ones(Nf, 1);
+function X_ESD = method_Qfunc_comb(H2, Pc, Pn, f, Ex, fd)
+% corrected SINR Q func + Comb waveform
+    Nf = length(f);
 
-% 设置 fmincon 选项
-options = optimoptions('fmincon', ...
-    'Algorithm', 'interior-point', ...     % 'interior-point' 'sqp'
-    'Display', 'final', ...
-    'MaxIterations', 2000, ...
-    'MaxFunctionEvaluations', 1e6);
+    X_ESD_WF = method_waterfill(H2, Pc, Pn, f, Ex);
+    delta_f = 1.5 * fd;                   % 梳状频率间隔
+    X_ESD_comb = zeros(1, Nf);
+    comb_freqs = -0.5 : delta_f : 0.5;    % 梳状频点位置（归一化）
 
-problem = createOptimProblem('fmincon', ...
-    'objective', fun, ...
-    'x0', x0, ...
-    'Aeq', Aeq, ...
-    'beq', beq, ...
-    'lb', zeros(Nf, 1), ...
-    'nonlcon', nonlcon, ...
-    'options', options);
+    for k = 1:length(comb_freqs)
+        [~, idx] = min(abs(f - comb_freqs(k))); % 找到最近频点
+        X_ESD_comb(idx) = X_ESD_WF(idx);        % 使用注水结果幅值
+    end
+    % 能量归一化 
+    X_ESD = X_ESD_comb * (trapz(f, X_ESD_WF) / trapz(f, X_ESD_comb));
 
-% 设置 MultiStart 搜索器，执行多起点搜索，尝试 20 个随机初值
-ms = MultiStart('UseParallel', false, 'Display', 'none');  % 可设置 true 并行加速
-[x_best, fval_best, exitflag, output, manymins] = run(ms, problem, 1);
-toc
-
-X_ESD_Qfunc = x_best';
-X_ESD_Qfunc_norm = X_ESD_Qfunc / max(X_ESD_Qfunc);
-
-fprintf('Q函数优化算法等效带宽： %.4f \n', ((sum(X_ESD_Qfunc) * df)^2 / (sum(X_ESD_Qfunc.^2) * df)));
-fprintf('Q函数优化算法能量： %.4f \n', sum(X_ESD_Qfunc) * df);
-fprintf('Q函数优化算法fd处Q函数值为： %.4f \n', sum(X_ESD_Qfunc .* circshift(X_ESD_Qfunc, [0, fd_num])) * df / Ex^2);
-
-
-
-%% 计算SINR
-fprintf('---------------- 计算SINR ---------------- \n');
-
-SINR_WF = sum(H2.* X_ESD_WF) / sum(X_ESD_WF .* Pc + Pn);
-SINR_bangbang = sum(H2 .* X_ESD_bangbang) / sum(X_ESD_bangbang .* Pc + Pn);
-SINR_joint = sum(H2 .* X_ESD_joint) / sum(X_ESD_joint .* Pc + Pn);
-SINR_Qfunc = sum(H2 .* X_ESD_Qfunc) / sum(X_ESD_Qfunc .* Pc + Pn);
-
-% SINR_corrected = sum(abs(Hf).^2 .* X_corrected) / sum(X_corrected .* Pc + Pn);
-fprintf('Original WF SINR (dB): %.4f\n', 10 * log10(SINR_WF));
-fprintf('bang-bang SINR (dB): %.4f\n', 10 * log10(SINR_bangbang));
-fprintf('joint SINR (dB): %.4f\n', 10 * log10(SINR_joint));
-fprintf('Qfunc SINR (dB): %.4f\n', 10 * log10(SINR_Qfunc));
-
-%% 绘制结果
-figure;
-plot(f, H2_norm, 'k--', 'LineWidth', 1.5); hold on;
-plot(f, Pc_norm, 'g--', 'LineWidth', 1.5);
-plot(f, Pn_norm, 'k--', 'LineWidth', 1);
-plot(f, X_ESD_WF_norm, 'b-', 'LineWidth', 1);
-plot(f, X_ESD_bangbang_norm, 'y-', 'LineWidth', 1.5);
-plot(f, X_ESD_joint_norm, 'r-', 'LineWidth', 1);
-plot(f, X_ESD_Qfunc_norm, 'm-', 'LineWidth', 0.5);
-legend('Target ESD |H(f)|^2', 'Clutter PSD P_c(f)', 'Noise PSD P_n(f)', 'Original WF ESD', 'bangbang ESD', 'joint ESD', 'Qfunc ESD', 'Location', 'bestoutside');
-title('Target and Interference Spectrum');
-xlabel('Normalized Frequency');
-ylabel('Nomalized ESD and PSD');
-grid on;
+end
 
 
+function Energy = energy(ESD, f)
+    df = f(2) - f(1);
+    Energy = sum(ESD) * df;
+end
 
-figure;
-plot(f, X_ESD_WF, 'b-', 'LineWidth', 1);hold on;
-% plot(f, X_ESD_bangbang, 'g-', 'LineWidth', 1.5);
-plot(f, X_ESD_joint, 'r-', 'LineWidth', 1);
-plot(f, X_ESD_Qfunc, 'm-', 'LineWidth', 0.5);
-legend('Original WF ESD', 'joint ESD', 'Qfunc ESD', 'Location', 'bestoutside');
-title('Target and Interference Spectrum');
-xlabel('Normalized Frequency');
-ylabel('ESD |X(f)|^2');
-grid on;
+function equal_bw = equivalent_bandwidth(ESD, f)
+    df = f(2) - f(1);
+    equal_bw = (sum(ESD) * df)^2 / (sum(ESD.^2) * df);
+end
 
+function Q_val = Qfunc(ESD, fd_num, f, Ex)
+    df = f(2) - f(1);
+    Q_val = sum(ESD .* circshift(ESD, [0, fd_num])) * df;
+end
 
+function sinr_val = SINR_compute(X_ESD, H2, Pc, Pn)
+    sinr_val = sum(H2 .* X_ESD) / sum(X_ESD .* Pc + Pn);
+end
 
-%% 时域恒模序列合成（Algorithm 2）
-max_iter = 5000;
-tolerance = 1e-1;
-M = 1000;  % 时域信号的点数
-fprintf('---------------- 生成时域波形 ---------------- \n');
-[signal_WF, ESD_WF_synthesized] = synthesize_signal_from_ESD(X_ESD_WF.', M, max_iter, tolerance);
-[signal_bangbang, ESD_bangbang_synthesized] = synthesize_signal_from_ESD(X_ESD_bangbang.', M, max_iter, tolerance);
-[signal_joint, ESD_joint_synthesized] = synthesize_signal_from_ESD(X_ESD_joint.', M, max_iter, tolerance);
-[signal_Qfunc, ESD_Qfunc_synthesized] = synthesize_signal_from_ESD(X_ESD_Qfunc.', M, max_iter, tolerance);
+function ESD_norm = normalize_esd(ESD)
+    ESD_norm = ESD / max(ESD);
+end
 
-
-autocorr_WF = xcorr(signal_WF, 'normalized'); % 归一化自相关
-autocorr_bangbang = xcorr(signal_bangbang, 'normalized'); % 归一化自相关
-autocorr_joint = xcorr(signal_joint, 'normalized'); % 归一化自相关
-autocorr_Qfunc = xcorr(signal_Qfunc, 'normalized'); % 归一化自相关
-lags = -length(signal_joint)+1 : length(signal_joint)-1; % 时延序列
-
-figure;
-plot(lags, 20*log10(abs(autocorr_WF)), 'b', 'LineWidth', 0.5);hold on;
-plot(lags, 20*log10(abs(autocorr_bangbang)), 'k', 'LineWidth', 0.5);
-plot(lags, 20*log10(abs(autocorr_joint)), 'r', 'LineWidth', 0.5);
-plot(lags, 20*log10(abs(autocorr_Qfunc)), 'm', 'LineWidth', 0.5);
-legend('Original Water-fill', 'bangbang ESD', 'Joint Constraints ESD', 'Qfunc ESD', 'Location', 'bestoutside');
-xlabel('时延（采样点）');
-ylabel('归一化自相关幅值 (dB)');
-title('合成信号的自相关函数（对数刻度）');
-ylim([-60, 0]); 
-grid on;
-
-% ------------------------  封装函数    ------------------------------------% 
-
-
-%% -------------------------测试部分-----------------------------------------------% 
+%% -------------------------测试部分-----------------------------------------------%
 
 % 比对给定的ESD和恒模生成的ESD
 % figure;
@@ -383,7 +364,7 @@ grid on;
 % SINR_comb = sum(H2.* X_ESD_comb) / sum(X_ESD_comb .* Pc + Pn);
 % fprintf('Original WF SINR (dB): %.4f\n', 10 * log10(SINR_WF));
 % fprintf('Original WF SINR (dB): %.4f\n', 10 * log10(SINR_comb));
-% 
+%
 % figure;
 % plot(f, H2_norm, 'k--', 'LineWidth', 1.5); hold on;
 % plot(f, Pc_norm, 'g--', 'LineWidth', 1.5);
