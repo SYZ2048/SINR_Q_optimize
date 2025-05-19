@@ -20,7 +20,7 @@ Q_ub = 1;
 c = 1500;
 
 % target info
-v_target = 3; % m/s
+v_target = 2; % m/s
 eta = 1 + 2*v_target / c;
 fd = bandwidth * (eta - 1) / bandwidth;
 fd_num = round(fd / df);
@@ -57,7 +57,7 @@ xlabel('Frequency');
 ylabel('ESD and PSD');
 grid on;
 
-methods_to_run = {'waterfill', 'joint', 'QfuncComb'};     % waterfill, bangbang, joint, Qfunc, QfuncComb
+methods_to_run = {'waterfill', 'joint', 'QfuncComb', 'lfm', 'bangbang'};     % waterfill, bangbang, joint, Qfunc, QfuncComb， lfm
 results = struct();
 for i = 1:length(methods_to_run)
     method = methods_to_run{i};
@@ -74,6 +74,10 @@ for i = 1:length(methods_to_run)
             X_ESD = method_Qfunc(H2, Pc, Pn, f, Ex, Be, Q_ub, fd_num);
         case 'QfuncComb'
             X_ESD = method_Qfunc_comb(H2, Pc, Pn, f, Ex, fd);
+        case 'lfm'
+            B_lfm = 1;  % LFM 带宽（可根据需求调整），归一化值 ∈ [0, 1]
+            X_ESD = method_lfm(f, Ex, B_lfm);
+
         otherwise
             warning('未知方法: %s', method);
             continue;
@@ -131,16 +135,75 @@ for i = 1:length(methods_to_run)
     method = methods_to_run{i};
     ac = results.(method).autocorr;
     lags = results.(method).lags;
-    plot(lags, 20*log10(abs(ac)), 'LineWidth', 0.5, 'Color', colors{i}); hold on;
+    subplot(2, 3, i);
+    plot(lags, 20*log10(abs(ac)), 'LineWidth', 0.5, 'Color', colors{i});
+    title([strrep(method, '_', '\_') ' autocorr']);
+    % legend(strcat(methods_to_run, ' autocorr'), 'Location', 'bestoutside');
+    xlabel('时延（采样点）');
+    ylabel('归一化自相关幅值 (dB)');
+    title('合成信号的自相关函数（对数刻度）');
+    ylim([-60, 0]);
+    grid on;
 end
-legend(strcat(methods_to_run, ' autocorr'), 'Location', 'bestoutside');
-xlabel('时延（采样点）');
-ylabel('归一化自相关幅值 (dB)');
-title('合成信号的自相关函数（对数刻度）');
-ylim([-60, 0]);
+
+
+%% -------------------------测试部分-----------------------------------------------%
+
+% 比对给定的ESD和恒模生成的ESD
+method = 'QfuncComb';
+figure;
+plot(f, normalize_esd(results.(method).X_ESD), 'b--', 'LineWidth', 0.5);
+hold on;
+plot(f, results.(method).ESD_synthesized, 'r', 'LineWidth', 0.5);
+xlabel('频率');
+ylabel('ESD');
+title('目标ESD与合成ESD对比');
+legend('目标ESD', '合成ESD');
 grid on;
 
+% 恒模生成波形的时域
+figure;
+plot(real(results.(method).signal), 'b', 'LineWidth', 0.5);
+% hold on;
+% plot(imag(a_final), 'r--', 'LineWidth', 1.5);
+xlabel('时间点');
+ylabel('幅值');
+title('合成时域信号');
+legend('实部');
+grid on;
 
+% figure;
+% titles = {'Original Water-fill', 'bangbang ESD', 'Joint Constraints ESD', 'Qfunc ESD'};
+% data = {autocorr_WF, autocorr_bangbang, autocorr_joint, autocorr_Qfunc};
+% colors = {'b', 'k', 'r', 'm'};
+% for i = 1:4
+%     subplot(2,2,i);
+%     plot(lags, 20*log10(abs(data{i})), colors{i}, 'LineWidth', 0.5);
+%     xlabel('时延（采样点）');
+%     ylabel('归一化自相关幅值 (dB)');
+%     title(titles{i});
+%     ylim([-60, 0]);
+%     grid on;
+% end
+% sgtitle('合成信号的自相关函数（对数刻度）');
+
+% %% 测试节
+% SINR_WF = sum(H2.* X_ESD_WF) / sum(X_ESD_WF .* Pc + Pn);
+% SINR_comb = sum(H2.* X_ESD_comb) / sum(X_ESD_comb .* Pc + Pn);
+% fprintf('Original WF SINR (dB): %.4f\n', 10 * log10(SINR_WF));
+% fprintf('Original WF SINR (dB): %.4f\n', 10 * log10(SINR_comb));
+%
+% figure;
+% plot(f, H2_norm, 'k--', 'LineWidth', 1.5); hold on;
+% plot(f, Pc_norm, 'g--', 'LineWidth', 1.5);
+% plot(f, Pn_norm, 'k--', 'LineWidth', 1);
+% plot(f, X_ESD_WF_norm, 'b-', 'LineWidth', 1);
+% plot(f, X_ESD_comb_norm, 'm-', 'LineWidth', 0.5);
+% legend('Target ESD |H(f)|^2', 'Clutter PSD P_c(f)', 'Noise PSD P_n(f)', 'Original WF ESD', 'Comb ESD', 'Location', 'bestoutside');
+% title('Target and Interference Spectrum');
+% xlabel('Normalized Frequency');
+% ylabel('Nomalized ESD and PSD');
+% grid on;
 
 %% ------------------------  封装函数    ------------------------------------%
 function [Hf, Pc, Pn, H2] = environment_init(Nf, bandwidth, f)
@@ -294,7 +357,7 @@ function X_ESD = method_Qfunc_comb(H2, Pc, Pn, f, Ex, fd)
     Nf = length(f);
 
     X_ESD_WF = method_waterfill(H2, Pc, Pn, f, Ex);
-    delta_f = 1.5 * fd;                   % 梳状频率间隔
+    delta_f = 3 * fd;                   % 梳状频率间隔
     X_ESD_comb = zeros(1, Nf);
     comb_freqs = -0.5 : delta_f : 0.5;    % 梳状频点位置（归一化）
 
@@ -307,6 +370,24 @@ function X_ESD = method_Qfunc_comb(H2, Pc, Pn, f, Ex, fd)
 
 end
 
+function X_ESD = method_lfm(f, Ex, B_lfm)
+    % f: 归一化频率向量 [-0.5, 0.5]
+    % Ex: 总发射能量
+    % B_lfm: LFM 波形的归一化带宽，例如0.2表示占频带的20%
+
+    df = f(2) - f(1);
+    Nf = length(f);
+    X_ESD = zeros(1, Nf);
+
+    f_low = -B_lfm / 2;
+    f_high = B_lfm / 2;
+    idx_range = (f >= f_low) & (f <= f_high);
+    X_ESD(idx_range) = 1;
+
+    % 能量归一化
+    current_energy = sum(X_ESD) * df;
+    X_ESD = X_ESD * (Ex / current_energy);
+end
 
 function Energy = energy(ESD, f)
     df = f(2) - f(1);
@@ -331,49 +412,5 @@ function ESD_norm = normalize_esd(ESD)
     ESD_norm = ESD / max(ESD);
 end
 
-%% -------------------------测试部分-----------------------------------------------%
 
-% 比对给定的ESD和恒模生成的ESD
-% figure;
-% plot(f, X_ESD_Qfunc_norm, 'b--', 'LineWidth', 0.5);
-% hold on;
-% plot(f, ESD_Qfunc_synthesized, 'r', 'LineWidth', 0.5);
-% xlabel('频率');
-% ylabel('ESD');
-% title('目标ESD与合成ESD对比');
-% legend('目标ESD', '合成ESD');
-% grid on;
-
-% figure;
-% titles = {'Original Water-fill', 'bangbang ESD', 'Joint Constraints ESD', 'Qfunc ESD'};
-% data = {autocorr_WF, autocorr_bangbang, autocorr_joint, autocorr_Qfunc};
-% colors = {'b', 'k', 'r', 'm'};
-% for i = 1:4
-%     subplot(2,2,i);
-%     plot(lags, 20*log10(abs(data{i})), colors{i}, 'LineWidth', 0.5);
-%     xlabel('时延（采样点）');
-%     ylabel('归一化自相关幅值 (dB)');
-%     title(titles{i});
-%     ylim([-60, 0]);
-%     grid on;
-% end
-% sgtitle('合成信号的自相关函数（对数刻度）');
-
-% %% 测试节
-% SINR_WF = sum(H2.* X_ESD_WF) / sum(X_ESD_WF .* Pc + Pn);
-% SINR_comb = sum(H2.* X_ESD_comb) / sum(X_ESD_comb .* Pc + Pn);
-% fprintf('Original WF SINR (dB): %.4f\n', 10 * log10(SINR_WF));
-% fprintf('Original WF SINR (dB): %.4f\n', 10 * log10(SINR_comb));
-%
-% figure;
-% plot(f, H2_norm, 'k--', 'LineWidth', 1.5); hold on;
-% plot(f, Pc_norm, 'g--', 'LineWidth', 1.5);
-% plot(f, Pn_norm, 'k--', 'LineWidth', 1);
-% plot(f, X_ESD_WF_norm, 'b-', 'LineWidth', 1);
-% plot(f, X_ESD_comb_norm, 'm-', 'LineWidth', 0.5);
-% legend('Target ESD |H(f)|^2', 'Clutter PSD P_c(f)', 'Noise PSD P_n(f)', 'Original WF ESD', 'Comb ESD', 'Location', 'bestoutside');
-% title('Target and Interference Spectrum');
-% xlabel('Normalized Frequency');
-% ylabel('Nomalized ESD and PSD');
-% grid on;
 
