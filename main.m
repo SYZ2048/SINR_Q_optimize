@@ -20,7 +20,7 @@ Q_ub = 1;
 c = 1500;
 
 % target info
-v_target = 2; % m/s
+v_target = 5; % m/s
 eta = 1 + 2*v_target / c;
 fd = bandwidth * (eta - 1) / bandwidth;
 fd_num = round(fd / df);
@@ -57,7 +57,9 @@ xlabel('Frequency');
 ylabel('ESD and PSD');
 grid on;
 
-methods_to_run = {'waterfill', 'joint', 'QfuncComb', 'lfm', 'bangbang'};     % waterfill, bangbang, joint, Qfunc, QfuncComb， lfm
+% methods_to_run = {'waterfill', 'joint', 'QfuncComb', 'lfm', 'bangbang'};     % waterfill, bangbang, joint, Qfunc, QfuncComb， lfm
+methods_to_run = {'QfuncComb'};     % waterfill, bangbang, joint, Qfunc, QfuncComb， lfm
+
 results = struct();
 for i = 1:length(methods_to_run)
     method = methods_to_run{i};
@@ -353,17 +355,26 @@ function X_ESD = method_Qfunc(H2, Pc, Pn, f, Ex, Be, Q_ub, fd_num)
 end
 
 function X_ESD = method_Qfunc_comb(H2, Pc, Pn, f, Ex, fd)
-% corrected SINR Q func + Comb waveform
+    % corrected SINR Q func + Comb waveform
     Nf = length(f);
-
     X_ESD_WF = method_waterfill(H2, Pc, Pn, f, Ex);
-    delta_f = 3 * fd;                   % 梳状频率间隔
-    X_ESD_comb = zeros(1, Nf);
-    comb_freqs = -0.5 : delta_f : 0.5;    % 梳状频点位置（归一化）
 
+    GC_r = 1.1;
+    delta = 3 * fd; 
+    f_start = -0.5;      % 起始频率
+
+    comb_freqs = f_start;   % 第一个频点
+    f_next = f_start + delta;
+    while f_next <= 0.5
+        comb_freqs(end+1) = f_next; %#ok<AGROW>
+        delta = delta * GC_r;          % 间隔按等比增长
+        f_next = f_next + delta;
+    end
+
+    X_ESD_comb = zeros(1, Nf);
     for k = 1:length(comb_freqs)
         [~, idx] = min(abs(f - comb_freqs(k))); % 找到最近频点
-        X_ESD_comb(idx) = X_ESD_WF(idx);        % 使用注水结果幅值
+        X_ESD_comb(idx) = X_ESD_WF(idx);        % 使用注水niy结果幅值
     end
     % 能量归一化 
     X_ESD = X_ESD_comb * (trapz(f, X_ESD_WF) / trapz(f, X_ESD_comb));
