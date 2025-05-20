@@ -7,7 +7,7 @@
 % ------------------------------------------------------------------------%
 clc;clear;
 close all;
-rng default
+rng default 
 
 bandwidth = 10e3; % 10k
 pulse_width = 1e-3; % 1 ms
@@ -20,7 +20,7 @@ Q_ub = 1;
 c = 1500;
 
 % target info
-v_target = 5; % m/s
+v_target = 3; % m/s
 eta = 1 + 2*v_target / c;
 fd = bandwidth * (eta - 1) / bandwidth;
 fd_num = round(fd / df);
