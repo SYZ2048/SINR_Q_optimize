@@ -15,7 +15,7 @@ close all;
 %   100               3         10            2               11
 %   500               4         9             5                8
 % -------------------------------------------------------------------------
-test_num = 3;
+test_num = 2;
 if test_num == 1
     noise_only = tdmsread("./20251014/LFM100k_B40k_fs400k_200ms_20ms_1.tdms");
     clutter_noise = tdmsread("./20251014/LFM100k_B40k_fs400k_200ms_20ms_4.tdms");
@@ -41,11 +41,19 @@ elseif test_num == 3
     fc = 80e3;
     Bw = 40e3;
 elseif test_num == 4
-    noise_only = tdmsread("./20251015/LFM60k_B40k_fs400k_100ms_5ms_1.tdms");
-    clutter_noise = tdmsread("./20251015/LFM80k_B40k_fs400k_100ms_5ms_13.tdms");
-    target_noise = tdmsread("./20251015/LFM80k_B40k_fs400k_100ms_5ms_12.tdms");
+    noise_only = tdmsread("./20251016/noise.tdms");
+    clutter_noise = tdmsread("./20251016/LFM10k-20k_fs400k_100ms_5ms_5.tdms");
+    target_noise = tdmsread("./20251016/LFM10k-20k_fs400k_100ms_5ms_4.tdms");
     T_cycle = 100e-3;
     Tp = 5e-3;
+    fc = 12.5e3;
+    Bw = 15e3;
+elseif test_num == 5
+    noise_only = tdmsread("./20251016/noise.tdms");
+    clutter_noise = tdmsread("./20251016/LFM10k-20k_fs400k_500ms_200ms_2.tdms");
+    target_noise = tdmsread("./20251016/LFM10k-20k_fs400k_500ms_200ms_3.tdms");
+    T_cycle = 500e-3;
+    Tp = 200e-3;
     fc = 12.5e3;
     Bw = 15e3;
 end
@@ -71,7 +79,7 @@ Np = fs * Tp;
 N_cycle = fs * T_cycle;
 c_v = 1500;
 
-analyse_cycle = 100;
+analyse_cycle = 10;
 N_analyse = N_cycle * analyse_cycle;
 t_mf = (0 : N_analyse-1) / fs;
 
@@ -80,25 +88,25 @@ threshold = 2;  % Reference signal values vary in [0, 3]
     findAnalysisInterval(noise_only_chanvals, threshold, N_analyse);
 noise_only_recv_sig = noise_only_recv_sig(start_idx_noise:end_idx_noise);
 noise_only_window = noise_only_window(start_idx_noise:end_idx_noise);
-figure();
-subplot(2,1,1);plot(t_mf*1e3, noise_only_recv_sig);title('Noise - Receive Signal in Time Domain - Selected Cycles');xlabel('Time(ms)')
-subplot(2,1,2);plot(t_mf*1e3, noise_only_window);title('Noise - Receive Signal Window in Time Domain - Selected Cycles');xlabel('Time(ms)')
+% figure();
+% subplot(2,1,1);plot(t_mf*1e3, noise_only_recv_sig);title('Noise - Receive Signal in Time Domain - Selected Cycles');xlabel('Time(ms)')
+% subplot(2,1,2);plot(t_mf*1e3, noise_only_window);title('Noise - Receive Signal Window in Time Domain - Selected Cycles');xlabel('Time(ms)')
 
 [start_idx_clutter, end_idx_clutter] = ...
     findAnalysisInterval(clutter_noise_chanvals, threshold, N_analyse);
 clutter_noise_recv_sig = clutter_noise_recv_sig(start_idx_clutter:end_idx_clutter);
 clutter_noise_window = clutter_noise_window(start_idx_clutter:end_idx_clutter);
-figure();
-subplot(2,1,1);plot(t_mf*1e3, clutter_noise_recv_sig);title('Clutter - Receive Signal in Time Domain - Selected Cycles');xlabel('Time(ms)')
-subplot(2,1,2);plot(t_mf*1e3, clutter_noise_window);title('Clutter - Receive Signal Window in Time Domain - Selected Cycles');xlabel('Time(ms)')
+% figure();
+% subplot(2,1,1);plot(t_mf*1e3, clutter_noise_recv_sig);title('Clutter - Receive Signal in Time Domain - Selected Cycles');xlabel('Time(ms)')
+% subplot(2,1,2);plot(t_mf*1e3, clutter_noise_window);title('Clutter - Receive Signal Window in Time Domain - Selected Cycles');xlabel('Time(ms)')
 
 [start_idx_target, end_idx_target] = ...
     findAnalysisInterval(target_noise_chanvals, threshold, N_analyse);
 target_noise_recv_sig = target_noise_recv_sig(start_idx_target:end_idx_target);
 target_noise_window = target_noise_window(start_idx_target:end_idx_target);
-figure();
-subplot(2,1,1);plot(t_mf*1e3, target_noise_recv_sig);title('Target - Receive Signal in Time Domain - Selected Cycles');xlabel('Time(ms)')
-subplot(2,1,2);plot(t_mf*1e3, target_noise_window);title('Target - Receive Signal Window in Time Domain - Selected Cycles');xlabel('Time(ms)')
+% figure();
+% subplot(2,1,1);plot(t_mf*1e3, target_noise_recv_sig);title('Target - Receive Signal in Time Domain - Selected Cycles');xlabel('Time(ms)')
+% subplot(2,1,2);plot(t_mf*1e3, target_noise_window);title('Target - Receive Signal Window in Time Domain - Selected Cycles');xlabel('Time(ms)')
 
 %% Matched Filter: 
 k = Bw/Tp;
@@ -111,16 +119,16 @@ transmit_signal = lfm;
 
 smf_target = matchedfilter(target_noise_recv_sig,transmit_signal,fs);
 smf_target = smf_target / max(abs(smf_target));
-figure();plot(t_mf*1e3, smf_target);title('Target - Matched Filter Result- Selected Cycles');xlabel('Time(ms)')
+% figure();plot(t_mf*1e3, smf_target);title('Target - Matched Filter Result- Selected Cycles');xlabel('Time(ms)')
 % xlim([100 120]);ylim([-0.01 0.01]);
 
 smf_clutter = matchedfilter(clutter_noise_recv_sig,transmit_signal,fs);
 smf_clutter = smf_clutter / max(abs(smf_clutter));
-figure();plot(t_mf*1e3, smf_clutter);title('Clutter - Matched Filter Result- Selected Cycles');xlabel('Time(ms)')
+% figure();plot(t_mf*1e3, smf_clutter);title('Clutter - Matched Filter Result- Selected Cycles');xlabel('Time(ms)')
 % xlim([100 120]);ylim([-0.01 0.01]);
 
 %% 计算功率谱密度和目标频率响应
-delay = 110.285e-3;
+delay = 10.285e-3;
 delay_direct_blast = 1.06e-3;
 delay_inference = 11.4e-3;
 distance = delay * c_v / 2
@@ -135,6 +143,11 @@ length(noise_only_recv_sig(delay*fs:delay*fs + Np))
 P_noise_avg = zeros(nfft/2+1, 1);   % N * 1
 P_clutter_noise_avg = zeros(nfft/2+1, 1);
 P_target_clutter_noise_avg = zeros(nfft/2+1, 1);
+
+% --pwelch进行功率谱密度估计
+%       对于实数信号输入，默认返回单边onesided功率谱，范围[0, fs/2]
+%       对于复数信号输入，默认值为 'twosided'，范围为[0,fs]
+%       'centered' - 对于实数值或复数值输入 x，范围为 [–fs/2, fs/2] 
 [P_tx, f] = pwelch(transmit_signal, window, noverlap, nfft, fs);
 num_cycles = analyse_cycle-1;
 for cycle = 0:num_cycles-1
@@ -341,12 +354,27 @@ f_lowbound = fc - Bw/4;
 f_highbound = fc + Bw/4;
 f_idx_start = find(f >= f_lowbound, 1, 'first');
 f_idx_end = find(f <= f_highbound, 1, 'last');
-Nf = f_idx_end - f_idx_start + 1;
-f = f(f_idx_start:f_idx_end);
+% Nf = f_idx_end - f_idx_start + 1;
+% f = f(f_idx_start:f_idx_end);
+% Pc = P_clutter(f_idx_start:f_idx_end).';
+% Pn = P_noise(f_idx_start:f_idx_end).';
+% H2 = P_target(f_idx_start:f_idx_end).';
+P_clutter([1:numel(P_clutter)] < f_idx_start | [1:numel(P_clutter)] > f_idx_end) = 0;
+P_noise([1:numel(P_noise)] < f_idx_start | [1:numel(P_noise)] > f_idx_end) = 0;
+P_target([1:numel(P_target)] < f_idx_start | [1:numel(P_target)] > f_idx_end) = 0;
 
-Pc = P_clutter(f_idx_start:f_idx_end).';
-Pn = P_noise(f_idx_start:f_idx_end).';
-H2 = P_target(f_idx_start:f_idx_end).';
+figure;
+plot(f/1e3, P_target, 'k-.', 'LineWidth', 1.5); hold on;
+plot(f/1e3, P_clutter, 'g--', 'LineWidth', 1.5); hold on;
+plot(f/1e3, P_noise, 'b-.', 'LineWidth', 0.5); 
+lgd = legend('目标响应|H(f)|^2', '混响PSD', '噪声PSD');
+lgd.FontSize = 14;                          % 图例字号
+lgd.Box      = 'off';                       % 去掉边框（可选）
+xlabel('频率 kHz', 'FontSize', 18);
+ylabel('幅度', 'FontSize', 18);
+set(gca, 'FontSize', 17);       % 坐标刻度字号
+grid on;
+
 
 upsample_factor = 10;  % 上采样倍数
 N_original = length(f);
@@ -354,13 +382,13 @@ N_upsampled = (N_original - 1) * upsample_factor + 1;
 % 创建新的频率向量
 f_upsampled = linspace(f(1), f(end), N_upsampled);
 % 对各个谱进行插值
-Pc = interp1(f, Pc, f_upsampled, 'pchip');
-Pn = interp1(f, Pn, f_upsampled, 'pchip');
-H2 = interp1(f, H2, f_upsampled, 'pchip');
+Pc = interp1(f, P_clutter, f_upsampled, 'pchip');
+Pn = interp1(f, P_noise, f_upsampled, 'pchip');
+H2 = interp1(f, P_target, f_upsampled, 'pchip');
 % 处理可能的NaN值（边界情况）
-Pc(isnan(Pc)) = 0;
-Pn(isnan(Pn)) = 0;
-H2(isnan(H2)) = 0;
+% Pc(isnan(Pc)) = 0;
+% Pn(isnan(Pn)) = 0;
+% H2(isnan(H2)) = 0;
 f = f_upsampled;
 
 
@@ -388,9 +416,41 @@ ylabel('幅度 dB', 'FontSize', 18);
 set(gca, 'FontSize', 17);       % 坐标刻度字号
 grid on;
 
+% -------------- Test Start ----------------------
+% 补0以满足后续波形优化归一化f的条件
+% f = linspace(-f(end), f(end), 2*N_upsampled-1);
+% H2 = [zeros(1,N_upsampled-1), H2];
+% Pc = [zeros(1,N_upsampled-1), Pc];
+% Pn = [zeros(1,N_upsampled-1), Pn];
+
+figure;
+subplot(2,1,1)
+plot(f/1e3, H2, 'k-.', 'LineWidth', 1.5); hold on;
+plot(f/1e3, Pc, 'g--', 'LineWidth', 1.5); hold on;
+plot(f/1e3, Pn, 'b-.', 'LineWidth', 0.5); 
+lgd = legend('目标响应|H(f)|^2', '混响PSD', '噪声PSD');
+lgd.FontSize = 14;                          % 图例字号
+lgd.Box      = 'off';                       % 去掉边框（可选）
+xlabel('频率 kHz', 'FontSize', 18);
+ylabel('幅度', 'FontSize', 18);
+set(gca, 'FontSize', 17);       % 坐标刻度字号
+grid on;
+subplot(2,1,2)
+plot(f/1e3, 10*log10(H2), 'k-.', 'LineWidth', 1.5); hold on;
+plot(f/1e3, 10*log10(Pc), 'g--', 'LineWidth', 1.5); hold on;
+plot(f/1e3, 10*log10(Pn), 'b-.', 'LineWidth', 0.5); 
+lgd = legend('目标响应|H(f)|^2', '混响PSD', '噪声PSD');
+lgd.FontSize = 14;                          % 图例字号
+lgd.Box      = 'off';                       % 去掉边框（可选）
+xlabel('频率 kHz', 'FontSize', 18);
+ylabel('幅度 dB', 'FontSize', 18);
+set(gca, 'FontSize', 17);       % 坐标刻度字号
+grid on;
+% -------------- Test End ----------------------
 
 Be = 4.7;                  % Equivalent Bandwidth Constraint
-Ex = 1e5;                  % Signal Energy
+% Ex = length(f)*2;                  % Signal Energy
+Ex = 1e10;
 Q_ub = 1;                   % Reverbration Constraint, 实际上限是Q_ub * Ex^2
 
 % target info
@@ -404,7 +464,7 @@ fd_num = round(f_doppler_target / df);
 max_iter = 5000;
 tolerance = 1e-5 * Np;
 fs_tx_sig = 1e6;
-len_gen_sig = 250;
+len_gen_sig = 1000;
 len_tx_sig = fs_tx_sig * Tp;
 sig_Upsample = len_tx_sig / len_gen_sig;
 fs_gen_sig = fs_tx_sig / sig_Upsample;
@@ -443,45 +503,68 @@ for i = 1:length(methods_to_run)
     if strcmp(method,'LFM')
         ESD_synthesized = X_ESD;
     else
-        [signal, ESD_synthesized] = synthesize_signal_from_ESD(X_ESD.', 250, max_iter, tolerance);
+        [signal, ESD_synthesized] = synthesize_signal_from_ESD(X_ESD.', len_gen_sig, max_iter, tolerance);
     end
     % -------------- Test Start ----------------------
     figure;plot(real(signal));title('Generated Transmit Signal Time Domain');
-    figure;plot(ESD_synthesized, 'r-', 'LineWidth', 0.5);title('ESD synthesized');
+    figure;plot(f/1e3, ESD_synthesized, 'r-', 'LineWidth', 0.5);title('ESD synthesized');grid on;
+
     N_gene_sig = length(signal);
     gene_sig_fft = fft(signal);
+    gene_sig_fft_shift = fftshift(gene_sig_fft);
     % 计算频率轴
     f_gene_sig = (0:N_gene_sig-1)*(fs_gen_sig/N_gene_sig);
+    f_gene_sig_shift = (-N_gene_sig/2:N_gene_sig/2-1)*(fs_gen_sig/N_gene_sig);
     % 计算能量谱密度
     ESD = abs(gene_sig_fft).^2;
+    ESD_shift = abs(gene_sig_fft_shift).^2;
     % 绘制能量谱密度
+    % figure;
+    % plot(f_gene_sig(1:N_gene_sig/2) / 1e3, ESD(1:N_gene_sig/2));
+    % xlabel('频率 (kHz)');
+    % ylabel('能量谱密度');
+    % title('原始生成时域信号的单边能量谱密度');
     figure;
-    plot(f_gene_sig / 1e3, ESD);
+    plot(f_gene_sig_shift / 1e3, ESD_shift);
     xlabel('频率 (kHz)');
     ylabel('能量谱密度');
-    title('原始生成时域信号的能量谱密度');
+    title('原始生成时域信号的双边能量谱密度');grid on;
     % -------------- Test End ----------------------
 
     % 对signal进行上采样
     signal = resample(signal, sig_Upsample, 1).';     % N * 1
-    % signal = repmat(signal, sig_Upsample, 1).';  % 重复20次得到5000点
 
     % -------------- Test Start ----------------------
     % figure;plot(real(signal));title('Generated Transmit Signal UPsample Time Domain');
     % figure;plot(f/1e3, ESD_synthesized, 'r-', 'LineWidth', 0.5);title('Generated Transmit Signal UPsample ESD synthesized');
     N_tx_sig = length(signal);
     tx_sig_fft = fft(signal);
-    fs_tx_sig = 1e6;
+    tx_sig_fft_shift = fftshift(tx_sig_fft);
     % 计算频率轴
-    f_gene_sig = (0:N_tx_sig-1)*(fs_tx_sig/N_tx_sig);
+    f_tx_sig = (0:N_tx_sig-1)*(fs_tx_sig/N_tx_sig);
+    f_tx_sig_shift = (-N_tx_sig/2:N_tx_sig/2-1) * (fs_tx_sig/N_tx_sig);
     % 计算能量谱密度
-    ESD = abs(tx_sig_fft).^2;
+    ESD_shift = abs(tx_sig_fft_shift).^2;
     % 绘制能量谱密度
     figure;
-    plot(f_gene_sig / 1e3, ESD);
+    plot(f_tx_sig_shift / 1e3, ESD_shift);
     xlabel('频率 (kHz)');
     ylabel('能量谱密度');
-    title('信号的能量谱密度');
+    title('生成信号上采样的双边能量谱密度');grid on;
+
+    tx_sig_real_fft = fft(real(signal));
+    % 计算频率轴
+    f_tx_sig = (0:N_tx_sig/2)*(fs_tx_sig/N_tx_sig);
+    % 计算能量谱密度
+    ESD = abs(tx_sig_real_fft).^2;
+    ESD_single_side = ESD(1:N_tx_sig/2+1);
+    ESD_single_side(2:end-1) = 2 * ESD_single_side(2:end-1);
+    % 绘制能量谱密度
+    figure;
+    plot(f_tx_sig / 1e3, ESD_single_side);
+    xlabel('频率 (kHz)');
+    ylabel('能量谱密度');
+    title('生成实信号上采样的单边能量谱密度');grid on;
     % -------------- Test End ----------------------
 
     fprintf('时域波形能量： %.4f \n', sum(abs(signal).^2))
@@ -509,22 +592,20 @@ for i = 1:length(methods_to_run)
 
 
 end
-% Ex^2 / Be
-% sum(results.('Waterfill_BW').X_ESD.^2) * df
-% sum(results.('Waterfill_BW').ESD_synthesized.^2) * df
+
 % ---------------------- 可视化 -------------------------------
 colors = {'b','r','m','c','g','y'};  % 自动配色用
 % 各自方法波形的ESD
-figure;
-for i = 1:length(methods_to_run)
-    method = methods_to_run{i};
-    plot(f/1e3, results.(method).X_ESD, 'LineWidth', 0.5, 'Color', colors{i}); hold on;
-end
-legend(methods_to_run, 'Location', 'bestoutside');
-title('Waveform Power Spectrum |X(f)|^2');
-xlabel('Frequency kHz');
-ylabel('ESD |X(f)|^2');
-grid on;
+% figure;
+% for i = 1:length(methods_to_run)
+%     method = methods_to_run{i};
+%     plot(f/1e3, results.(method).X_ESD, 'LineWidth', 0.5, 'Color', colors{i}); hold on;
+% end
+% legend(methods_to_run, 'Location', 'bestoutside');
+% title('Waveform Power Spectrum |X(f)|^2');
+% xlabel('Frequency kHz');
+% ylabel('ESD |X(f)|^2');
+% grid on;
 
 %% ------------------------  封装函数    ------------------------------------%
 
